@@ -1,0 +1,3 @@
+[submodule "firmware/state_store/eeprom-emulation"]
+	path = firmware/state_store/eeprom-emulation
+	url = https://github.com/nathri/stm32-eeprom-emulation
