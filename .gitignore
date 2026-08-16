@@ -1,0 +1,12 @@
+build/
+*.o
+*.elf
+*.bin
+*.map
+.cache/
+.settings/
+.metadata/
+.cproject
+.project
+__pycache__/
+*.pyc

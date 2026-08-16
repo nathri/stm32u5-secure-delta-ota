@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "DRAFT - exact manifest schema is an open question (see ARCHITECTURE.md). Not finalized or consumed by any code yet.",
+  "title": "OTA Update Manifest",
+  "type": "object",
+  "properties": {
+    "version": { "type": "string" },
+    "target_image_size": { "type": "integer" },
+    "patch_hash": { "type": "string" },
+    "signature": { "type": "string" }
+  },
+  "required": []
+}
