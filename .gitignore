@@ -10,3 +10,6 @@ build/
 .project
 __pycache__/
 *.pyc
+
+# Local-only backup, never committed
+_archive/

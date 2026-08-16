@@ -1,46 +1,103 @@
-# Secure Delta OTA — STM32U5
+# Architecture
 
 ## Problem
-Most reference OTA implementations assume a full second flash slot (A/B) and
-cheap bandwidth to resend a whole image every update. This project targets
-the opposite case: a single-bank-friendly, low-power MCU on a slow/simple
-link, updated via signed delta patches instead of full images, with
-power-loss-safe staging and automatic rollback.
 
-## Goals
-- Hardware-rooted trust: boot ROM + RDP + OTP public key, not software-only checks
-- Power-loss resilience: no update state is undefined after a cut at any point
-- Bandwidth/flash efficiency: delta patches, not full-image duplication
-- Automatic rollback if the new image fails a post-boot health check
+Reference OTA implementations for microcontrollers typically assume a
+duplicated firmware slot (A/B) and sufficient bandwidth to transfer a full
+image on every update. Neither assumption holds for cost-constrained,
+single-bank MCUs on low-bandwidth or metered links.
 
-## Non-goals (v1)
-- Multi-device fleet management
-- Key rotation / revocation
-- Wireless transport (UART only for v1 — PC is the "server", no second board)
+This project updates firmware via signed binary deltas, verified through a
+hardware-rooted chain of trust, and applied through a power-loss-safe
+staging process with automatic rollback.
+
+## Design goals
+
+- Hardware-rooted trust — signature verification anchored in boot ROM,
+  read-out protection (RDP), and an OTP-provisioned public key
+- Power-loss resilience — update state remains well-defined after a power
+  loss at any point in the process
+- Bandwidth and flash efficiency — delta patches rather than full-image
+  duplication
+- Fail-safe recovery — automatic rollback if a new image fails a post-boot
+  health check
+
+## Scope (v1)
+
+Single-device updates over a wired UART link, from a host machine acting as
+the update source. Fleet management, key rotation, and wireless transport
+are treated as future work.
 
 ## Target hardware
-- Board: STM32U5 (Nucleo-U575ZI-Q class), Cortex-M33 w/ TrustZone
-- Rationale: ultra-low-power line fits the intended use case; reuses your
-  existing EEPROM-emulation codebase for the state store; TrustZone via GTZC
-  gives secure/non-secure isolation
 
-## Corrections locked in from earlier discussion
-- U5 has NO hardware EDATA — state store uses **software EEPROM emulation**
-  (AN4894-style), built on your existing EEPROM emulation project
-- TrustZone isolation on U5 is via **GTZC** (Global TrustZone Controller),
-  not RIF — RIF is STM32N6/MP2 only
+STM32U5 (Cortex-M33, TrustZone), developed against a Nucleo-U575ZI-Q class
+board. TrustZone secure/non-secure isolation is implemented via GTZC
+(Global TrustZone Controller). The update-state store uses software EEPROM
+emulation, as the U5 series does not implement a hardware high-cycle data
+area.
 
-## Key design decisions (locked)
+## System architecture
+
+```mermaid
+flowchart TB
+    subgraph HOST["Host — update source"]
+        OLDFW["Old firmware v(N)"]
+        NEWFW["New firmware v(N+1)"]
+        DIFF["Diff tool"]
+        MANIFEST["Manifest: version, base hash, target hash"]
+        SIGN["Sign package"]
+        PKG["Signed delta package"]
+        OLDFW --> DIFF
+        NEWFW --> DIFF
+        DIFF --> MANIFEST --> SIGN --> PKG
+    end
+
+    PKG -->|UART| TRANSPORT
+
+    subgraph DEVICE["STM32U5"]
+        TRANSPORT["Transport receiver"]
+        AGENT["Update agent"]
+        subgraph SECURE["Secure world (GTZC)"]
+            VERIFY["Signature verification (PKA, OTP key)"]
+            PATCH["Delta patch engine"]
+            STAGE["Staging flash"]
+            STATE["Update state store"]
+        end
+        BOOT["Bootloader"]
+        TRIAL["Trial boot"]
+        HEALTH["Health check"]
+        ROLLBACK["Rollback"]
+
+        TRANSPORT --> AGENT --> VERIFY
+        VERIFY -->|valid| PATCH --> STAGE --> STATE --> BOOT
+        VERIFY -->|invalid| AGENT
+        BOOT -->|hash OK| TRIAL --> HEALTH
+        HEALTH -->|confirmed| STATE
+        HEALTH -->|fail| ROLLBACK --> STATE
+    end
+```
+
+## Design decisions
+
 | Decision | Choice | Rationale |
-| --- | --- | --- |
-| Board | STM32U5 | low power, reuse of existing EEPROM emulation work |
-| State store | Software EEPROM emulation | U5 has no hardware EDATA |
-| TrustZone mechanism | GTZC | correct for U5 (not RIF) |
-| Transport (v1) | UART | simplest end-to-end proof, no second board |
-| Delta algorithm | TBD — evaluate detools | lightweight, embedded-oriented, streamable |
-| Key management (v1) | Static public key in OTP/option bytes | no rotation needed for portfolio scope |
+|---|---|---|
+| Board | STM32U5 | Low-power target; TrustZone via GTZC |
+| State store | Software EEPROM emulation | No hardware EDATA on U5 |
+| Transport (v1) | UART | Minimal viable proof of the full pipeline |
+| Signature verification | Hardware PKA, ECDSA P-256 | Side-channel resistant, no external crypto library |
+| Key management (v1) | Static public key in OTP | Sufficient for current scope |
 
-## Open questions
-- Exact manifest schema (fields, JSON vs CBOR)
-- Health-check criteria for confirming trial boot
-- Staging partition size/location in the U5 flash map
+## Roadmap
+
+1. Secure boot and signed image verification
+2. Power-loss-safe, redundant update-state store
+3. Delta patch engine
+4. Trial boot, health check, and rollback controller
+5. Host-side tooling (patch generation, signing, manifest)
+6. Wireless transport (future work)
+
+## Future work
+
+- Fleet-scale update orchestration
+- Key rotation and revocation
+- Wireless transport (BLE, LoRa, or cellular bridge)
